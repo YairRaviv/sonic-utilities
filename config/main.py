@@ -9264,5 +9264,28 @@ def motd(message):
                         {'motd': message})
 
 
+@config.command('tx_monitor_threshold')
+@click.argument('threshold', metavar='<threshold>', required=True, type=click.IntRange(0, 4294967295))
+def tx_monitor_threshold(threshold):
+    """
+    Set the threshold for tx monitoring agent
+    """
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    config_db.mod_entry("TX_MONITOR_CONFIG_TABLE", 'tx_monitoring_config',
+                        {'tx_monitoring_threshold': threshold})
+
+@config.command('tx_monitor_time_period')
+@click.argument('time_period', metavar='<time_period>', required=True, type=click.IntRange(1, 4294967295))
+def tx_monitor_time_period(time_period):
+    """
+    Set the time period for tx monitoring agent
+    """
+    config_db = ConfigDBConnector()
+    config_db.connect()
+    config_db.mod_entry("TX_MONITOR_CONFIG_TABLE", 'tx_monitoring_config',
+                        {'tx_monitoring_time_period': time_period})
+
+
 if __name__ == '__main__':
     config()

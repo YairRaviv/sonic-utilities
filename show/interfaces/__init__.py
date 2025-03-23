@@ -1157,3 +1157,21 @@ def dhcp_mitigation_rate(db, interfacename):
 
     header = ['Interface', 'DHCP Mitigation Rate']
     click.echo(tabulate(tablelize(keys), header, tablefmt="simple", stralign='left'))
+
+@interfaces.command()
+def tx_status():
+    state_db = SonicV2Connector(host='127.0.0.1')
+    state_db.connect(state_db.STATE_DB)
+    keys_prefix = "TX_MONITOR_STATUS_TABLE|"
+    keys = state_db.keys(state_db.STATE_DB, keys_prefix + "*")
+    if not keys:
+        click.echo("TX status not found")
+        return
+    result = []
+    tx_monitoring_status_field = "tx_monitoring_status"
+    for key in natsorted(keys):
+        port_name = key.replace(keys_prefix, "")
+        port_result = [port_name]
+        port_result.append(state_db.get(state_db.STATE_DB, key, tx_monitoring_status_field))
+        result.append(port_result)
+    click.echo(tabulate(result, headers=["Port", "Tx Status"], tablefmt="grid"))
