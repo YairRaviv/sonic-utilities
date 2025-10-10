@@ -3428,12 +3428,15 @@ This command is used to show ipv4 dhcp_relay helper.
 - Example:
   ```
   admin@sonic:~$ show dhcp_relay ipv4 helper
-  --------  ---------
-  Vlan1000  192.0.0.1
-            192.0.0.2
-  --------  ---------
-  ```
-
+  +-------------+----------------------+
+  |   Interface |   DHCP Relay Address |
+  +=============+======================+
+  |   Vlan1000  |        192.0.0.1     |
+  |             |        192.0.0.2     |
+  |             |        192.0.0.3     |
+  |             |        192.0.0.4     |
+  +-------------+----------------------+
+  ```  
 **show dhcp_relay ipv6 destination**
 
 This command is used to show ipv6 dhcp_relay destination.
@@ -3446,12 +3449,14 @@ This command is used to show ipv6 dhcp_relay destination.
 - Example:
   ```
   admin@sonic:~$ show dhcp_relay ipv6 destination
-  --------  ------------
-  Vlan1000  fc02:2000::1
-            fc02:2000::2
-            fc02:2000::3
-            fc02:2000::4
-  --------  ------------
+  +-------------+---------------------+
+  |  Interface  |  DHCP Relay Address |
+  +=============+=====================+
+  |  Vlan1000   |       fc02:2000::1  |
+  |             |       fc02:2000::2  |
+  |             |       fc02:2000::3  |
+  |             |       fc02:2000::4  |
+  +-------------+---------------------+
   ```
 
 **show dhcp_relay ipv6 counters**
@@ -3734,18 +3739,11 @@ This command is used to show dhcp_server ip range.
 - Example
   ```
   show dhcp_server ipv4 range range_1
-  +---------+-------------+---------------+-----------+
-  | Range   |  IP Start   |  IP End       |  IP count |
-  |=========+=============+===============+===========+
-  | range_1 | 192.168.0.5 | 192.168.0.10  |   6       |
-  +---------+-------------+---------------+-----------+
-
-  admin@bjw-can-720dt-2:~$ show dhcp_server ipv4 range range_1
-  +---------+-------------+-------------+------------+
-  | Range   | IP Start    | IP End      |   IP Count |
-  +=========+=============+=============+============+
-  | range_1 | 192.168.0.2 | 192.168.0.2 |          1 |
-  +---------+-------------+-------------+------------+
+  +---------+-------------+--------------+------------+
+  | Range   | IP Start    | IP End       |   IP Count |
+  +=========+=============+==============+============+
+  | range_1 | 192.168.0.5 | 192.168.0.10 |          6 |
+  +---------+-------------+--------------+------------+
 
   show dhcp_server ipv4 range 
   +---------+-------------+--------------+------------+
