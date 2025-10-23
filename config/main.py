@@ -18,6 +18,7 @@ import itertools
 import copy
 import tempfile
 import sonic_yang
+import jsonpointer
 
 from jsonpatch import JsonPatchConflict
 from jsonpointer import JsonPointerException
@@ -141,6 +142,20 @@ sonic_cfggen = load_module_from_source('sonic_cfggen', '/usr/local/bin/sonic-cfg
 #
 # Helper functions
 #
+
+
+# Get all running configuration in JSON format
+def get_all_running_config():
+    command = ["show", "runningconfiguration", "all"]
+    proc = subprocess.Popen(command, text=True, stdout=subprocess.PIPE)
+
+    all_running_config, stderr_output = proc.communicate()
+    returncode = proc.returncode
+
+    if returncode:
+        raise GenericConfigUpdaterError(f"Fetch all runningconfiguration failed as {returncode}")
+    return all_running_config
+
 
 # Sort nested dict
 def sort_dict(data):
@@ -1352,17 +1367,107 @@ def apply_patch_for_scope(scope_changes, results, config_format, verbose, dry_ru
         log.log_error(f"'apply-patch' executed failed for {scope_for_log} by {changes} due to {str(e)}")
 
 
-def validate_patch(patch):
-    try:
-        command = ["show", "runningconfiguration", "all"]
-        proc = subprocess.Popen(command, text=True, stdout=subprocess.PIPE)
-        all_running_config, returncode = proc.communicate()
-        if returncode:
-            log.log_notice(f"Fetch all runningconfiguration failed as output:{all_running_config}")
-            return False
+def filter_duplicate_patch_operations(patch_ops, all_running_config):
+    # Return early if no patch operation targets a leaf-list append (path endswith "/-")
+    if not any(op.get("path", "").endswith("/-") for op in patch_ops):
+        return patch_ops
+    config = json.loads(all_running_config) if isinstance(all_running_config, str) else all_running_config
 
+    patch_copy = jsonpatch.JsonPatch([copy.deepcopy(op) for op in patch_ops])
+    all_target_config = patch_copy.apply(config)
+
+    def find_duplicate_entries_in_config(config):
+        duplicates = {}
+
+        def _check(obj, path=""):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    _check(v, f"{path}/{k}" if path else f"/{k}")
+            elif isinstance(obj, list):
+                seen = set()
+                dups = set()
+                for item in obj:
+                    if item in seen:
+                        dups.add(item)
+                    else:
+                        seen.add(item)
+                if dups:
+                    duplicates[path] = list(dups)
+                for idx, item in enumerate(obj):
+                    _check(item, f"{path}[{idx}]")
+        _check(config)
+        return duplicates
+
+    dups = find_duplicate_entries_in_config(all_target_config)
+
+    if not dups:
+        return patch_ops
+
+    ops_to_remove = set()
+    for path, dup_values in dups.items():
+        list_path = path
+        for op_idx, op in enumerate(patch_ops):
+            if op.get("op") == "add" and op.get("path", "").endswith("/-"):
+                if (
+                    op.get("path").startswith(list_path)
+                    and op.get("value") in dup_values
+                ):
+                    ops_to_remove.add(op_idx)
+
+    # Remove the duplicate-causing ops from patch
+    return [op for idx, op in enumerate(patch_ops) if idx not in ops_to_remove]
+
+
+def append_emptytables_if_required(patch_ops, all_running_config):
+    config = json.loads(all_running_config) if isinstance(all_running_config, str) else all_running_config
+    missing_tables = set()
+
+    patch_ops_copy = [copy.deepcopy(op) for op in patch_ops]
+
+    for operation in patch_ops_copy:
+        if 'path' in operation:
+            path_parts = operation['path'].strip('/').split('/')
+            if not path_parts:
+                continue
+
+            if path_parts[0].startswith('asic') or path_parts[0] == HOST_NAMESPACE:
+                if len(path_parts) < 2:
+                    continue
+                table_path = f"/{path_parts[0]}/{path_parts[1]}"
+            else:
+                table_path = f"/{path_parts[0]}"
+
+            try:
+                jsonpointer.resolve_pointer(config, table_path)
+            except jsonpointer.JsonPointerException as ex:
+                log.log_info(f"Table {table_path} is missing in running config: {ex}")
+                missing_tables.add(table_path)
+
+    if not missing_tables:
+        return patch_ops_copy
+
+    for table in missing_tables:
+        insert_idx = None
+        for idx, op in enumerate(patch_ops_copy):
+            if 'path' in op and op['path'].startswith(table):
+                insert_idx = idx
+                break
+        empty_table_patch = {"op": "add", "path": table, "value": {}}
+        if insert_idx is not None:
+            patch_ops_copy.insert(insert_idx, empty_table_patch)
+        else:
+            patch_ops_copy.append(empty_table_patch)
+
+    return patch_ops_copy
+
+
+def validate_patch(patch_ops, all_running_config):
+    try:
         # Structure validation and simulate apply patch.
-        all_target_config = patch.apply(json.loads(all_running_config))
+        config = json.loads(all_running_config) if isinstance(all_running_config, str) else all_running_config
+        # Create a temporary JsonPatch object to apply without modifying the original
+        patch_copy = jsonpatch.JsonPatch([copy.deepcopy(op) for op in patch_ops])
+        all_target_config = patch_copy.apply(config)
 
         # Verify target config by YANG models
         target_config = all_target_config.pop(HOST_NAMESPACE) if multi_asic.is_multi_asic() else all_target_config
@@ -1379,7 +1484,7 @@ def validate_patch(patch):
 
         return True
     except Exception as e:
-        raise GenericConfigUpdaterError(f"Validate json patch: {patch} failed due to:{e}")
+        raise GenericConfigUpdaterError(f"Validate json patch: {patch_ops} failed due to:{e}")
 
 
 def multiasic_validate_single_file(filename):
@@ -1730,10 +1835,21 @@ def apply_patch(ctx, patch_file_path, format, dry_run, parallel, ignore_non_yang
         with open(patch_file_path, 'r') as fh:
             text = fh.read()
             patch_as_json = json.loads(text)
-            patch = jsonpatch.JsonPatch(patch_as_json)
+            patch_ops = patch_as_json
 
-        if not validate_patch(patch):
-            raise GenericConfigUpdaterError(f"Failed validating patch:{patch}")
+        all_running_config = get_all_running_config()
+
+        # Pre-process patch to append empty tables if required.
+        patch_ops = append_emptytables_if_required(patch_ops, all_running_config)
+
+        # Pre-process patch to filter duplicate leaf-list appends.
+        patch_ops = filter_duplicate_patch_operations(patch_ops, all_running_config)
+
+        if not validate_patch(patch_ops, all_running_config):
+            raise GenericConfigUpdaterError(f"Failed validating patch:{patch_ops}")
+
+        # Convert patch_ops to JsonPatch object for further processing
+        patch = jsonpatch.JsonPatch(patch_ops)
 
         results = {}
         config_format = ConfigFormat[format.upper()]
