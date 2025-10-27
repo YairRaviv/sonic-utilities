@@ -129,9 +129,26 @@ def description(interfacename, namespace, display, verbose):
 
     clicommon.run_command(cmd, display_cmd=verbose)
 
+@interfaces.group(name='fast-linkup', cls=clicommon.AliasedGroup)
+def fast_linkup():
+    """Show interface fast-linkup information"""
+    pass
+
+@fast_linkup.command(name='status')
+@click.pass_context
+def fast_linkup_status(ctx):
+    """show interfaces fast-linkup status"""
+    config_db = ConfigDBConnector()
+    config_db.connect() 
+    ports = config_db.get_table('PORT') or {}
+    rows = []
+    for ifname, entry in natsorted(ports.items()):
+        fast_linkup = entry.get('fast_linkup', 'false')
+        rows.append([ifname, fast_linkup])
+        
+    click.echo(tabulate(rows, headers=['Interface', 'fast_linkup'], tablefmt='outline'))
+
 # 'naming_mode' subcommand ("show interfaces naming_mode")
-
-
 @interfaces.command('naming_mode')
 @click.option('--verbose', is_flag=True, help="Enable verbose output")
 def naming_mode(verbose):

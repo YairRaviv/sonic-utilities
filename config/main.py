@@ -4896,6 +4896,93 @@ def interface(ctx, namespace):
     config_db = ConfigDBConnector(use_unix_socket_path=True, namespace=str(namespace))
     config_db.connect()
     ctx.obj = {'config_db': config_db, 'namespace': str(namespace)}
+
+@config.group(cls=clicommon.AliasedGroup, name='switch-fast-linkup', context_settings=CONTEXT_SETTINGS)
+@click.pass_context
+def switch_fast_linkup_group(ctx):
+    """Configure fast link-up global configuration parameters"""
+    pass
+
+# 'global' subcommand
+@switch_fast_linkup_group.command(name='global')
+@click.option('--polling-time', type=int, required=False, help='Polling time (sec)')
+@click.option('--guard-time', type=int, required=False, help='Guard time (sec)')
+@click.option('--ber', '--ber-threshold', type=int, required=False, help='BER threshold exponent (e.g., 12 for 1e-12)')
+@clicommon.pass_db
+def switch_fast_linkup_global_cmd(db, polling_time, guard_time, ber):
+    """Configure global fast link-up feature parameters"""
+    if polling_time is None and guard_time is None and ber is None:
+        raise click.UsageError('Failed to configure fast link-up global: no options are provided')
+    # Read capability and ranges from STATE_DB for validation
+    state = db.db
+    cap_tbl = state.STATE_DB
+    entry = state.get_all(cap_tbl, 'SWITCH_CAPABILITY|switch') or {}
+    if entry.get('FAST_LINKUP_CAPABLE', 'false') != 'true':
+        raise click.ClickException('Error: Fast link-up is not supported on this platform')
+    def _parse_range(s):
+        try:
+            parts = (s or '').split(',')
+            return int(parts[0]), int(parts[1])
+        except Exception:
+            return None
+    poll_range = _parse_range(entry.get('FAST_LINKUP_POLLING_TIMER_RANGE'))
+    guard_range = _parse_range(entry.get('FAST_LINKUP_GUARD_TIMER_RANGE'))
+
+    # Load existing configuration to preserve unspecified values
+    existing = db.cfgdb.get_entry('SWITCH_FAST_LINKUP', 'GLOBAL') or {}
+    def to_int(val):
+        try:
+            return int(val)
+        except Exception:
+            return None
+
+    polling_time = polling_time if polling_time is not None else to_int(existing.get('polling_time'))
+    guard_time = guard_time if guard_time is not None else to_int(existing.get('guard_time'))
+    ber = ber if ber is not None else to_int(existing.get('ber_threshold') or existing.get('ber'))
+
+    data = {}
+    if polling_time is not None:
+        if poll_range and not (poll_range[0] <= int(polling_time) <= poll_range[1]):
+            raise click.ClickException('Error: polling_time {} out of supported range [{}, {}]'.format(polling_time, poll_range[0], poll_range[1]))
+        data['polling_time'] = str(polling_time)
+    if guard_time is not None:
+        if guard_range and not (guard_range[0] <= int(guard_time) <= guard_range[1]):
+            raise click.ClickException('Error: guard_time {} out of supported range [{}, {}]'.format(guard_time, guard_range[0], guard_range[1]))
+        data['guard_time'] = str(guard_time)
+    if ber is not None:
+        data['ber_threshold'] = str(ber)
+    try:
+        db.cfgdb.set_entry('SWITCH_FAST_LINKUP', 'GLOBAL', data)
+        log.log_notice('Configured fast link-up global: {}'.format(data))
+    except Exception as e:
+        log.log_error('Failed to configure fast link-up global: {}'.format(str(e)))
+        raise SystemExit(1)
+
+@interface.command('fast-linkup')
+@click.argument('interface_name', metavar='<interface_name>', required=True)
+@click.argument('mode', metavar='<enabled|disabled|true|false|on|off>', required=True, type=click.Choice(['enabled','disabled','true','false','on','off']))
+@click.option('-v', '--verbose', is_flag=True, help='Enable verbose output')
+@click.pass_context
+def fast_linkup(ctx, interface_name, mode, verbose):
+    """Enable/disable fast link-up on an interface"""
+    config_db = ctx.obj['config_db']
+    if clicommon.get_interface_naming_mode() == 'alias':
+        interface_name = interface_alias_to_name(config_db, interface_name)
+        if interface_name is None:
+            ctx.fail("'interface_name' is None!")
+    if not interface_name_is_valid(config_db, interface_name):
+        ctx.fail('Error: Interface name is invalid. Please enter a valid interface name')
+
+    log.log_info("'interface fast-linkup {} {}' executing...".format(interface_name, mode))
+
+    if ctx.obj['namespace'] is DEFAULT_NAMESPACE:
+        command = ['portconfig', '-p', str(interface_name), '-fl', str(mode)]
+    else:
+        command = ['portconfig', '-p', str(interface_name), '-fl', str(mode), '-n', str(ctx.obj['namespace'])]
+
+    if verbose:
+        command += ['-vv']
+    clicommon.run_command(command, display_cmd=verbose)
 #
 # 'startup' subcommand
 #
