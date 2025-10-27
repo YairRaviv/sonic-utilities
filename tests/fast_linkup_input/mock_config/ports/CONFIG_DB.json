@@ -1,0 +1,13 @@
+{
+  "PORT": {
+    "Ethernet0": {
+      "admin_status": "up",
+      "fast_linkup": "true"
+    },
+    "Ethernet4": {
+      "admin_status": "up",
+      "fast_linkup": "false"
+    }
+  }
+}
+

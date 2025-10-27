@@ -5323,6 +5323,92 @@ This command is used to manage switch hash algorithm global configuration.
   admin@sonic:~$ config switch-hash global lag-hash-algorithm 'CRC'
   ```
 
+## Fast Link-Up
+
+This section documents the commands to configure and display the Fast Link-Up feature.
+
+### Fast Link-Up Show Commands
+
+**show switch-fast-linkup global**
+
+Display switch Fast Link-Up global configuration.
+
+- Usage:
+  ```bash
+  show switch-fast-linkup global [--json]
+  ```
+
+- Examples:
+  ```bash
+  admin@sonic:~$ show switch-fast-linkup global
+  Field          Value
+  -------------  -----
+  polling_time   60
+  guard_time     10
+  ber_threshold  12
+  ```
+
+**show interfaces fast-linkup-mode**
+
+Display per-interface Fast Link-Up mode.
+
+- Usage:
+  ```bash
+  show interfaces fast-linkup-mode
+  ```
+
+- Example:
+  ```bash
+  admin@sonic:~$ show interfaces fast-linkup-mode
+  Interface    fast_linkup
+  -----------  -----------
+  Ethernet0    on
+  Ethernet4    off
+  ```
+
+### Fast Link-Up Config Commands
+
+**config switch-fast-linkup global**
+
+Configure the switch Fast Link-Up global parameters.
+
+- Usage:
+  ```bash
+  config switch-fast-linkup global [--polling-time <sec>] [--guard-time <sec>] [--ber <exp>]
+  ```
+
+- Parameters:
+  - _polling-time_: time in seconds to attempt fast link-up (uint16). Validated against `SWITCH_CAPABILITY|switch:FAST_LINKUP_POLLING_TIMER_RANGE`.
+  - _guard-time_: time in seconds link must stay up with low BER to keep fast link-up (uint8). Validated against `FAST_LINKUP_GUARD_TIMER_RANGE`.
+  - _ber_: BER threshold exponent (int8). Example: 12 means 1e-12.
+
+- Validation:
+  - Reads `SWITCH_CAPABILITY|switch` from STATE_DB. Fails if `FAST_LINKUP_CAPABLE != true`.
+  - If ranges are present, rejects out-of-range `polling_time`/`guard_time`.
+
+- Examples:
+  ```bash
+  admin@sonic:~$ config switch-fast-linkup global --polling-time 60 --guard-time 10 --ber 12
+  ```
+
+**config interface fast-linkup-mode**
+
+Enable/disable Fast Link-Up per interface.
+
+- Usage:
+  ```bash
+  config interface fast-linkup-mode <interface_name> <enabled|disabled>
+  ```
+
+- Behavior:
+  - Writes `PORT|<interface_name>:fast_linkup` as `on` (for enabled) or `off` (for disabled).
+
+- Examples:
+  ```bash
+  admin@sonic:~$ config interface fast-linkup-mode Ethernet0 enabled
+  admin@sonic:~$ config interface fast-linkup-mode Ethernet4 disabled
+  ```
+
 ## Interfaces
 
 ### Interface Show Commands

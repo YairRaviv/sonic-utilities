@@ -331,6 +331,40 @@ cli.add_command(copp.copp)
 # syslog module
 cli.add_command(syslog.syslog)
 
+@cli.group(cls=clicommon.AliasedGroup, name='switch-fast-linkup')
+@click.pass_context
+def switch_fast_linkup_group(ctx):
+    """ Show fast link-up feature configuration """
+    pass
+
+@switch_fast_linkup_group.command(name='global')
+@click.option('--json', 'json_output', is_flag=True, default=False, help='JSON output')
+@click.pass_context
+def show_fast_linkup_global(ctx, json_output):
+    db = Db()
+    data = db.cfgdb.get_entry('SWITCH_FAST_LINKUP', 'GLOBAL') or {}
+    if json_output:
+        import json
+        click.echo(json.dumps(data, indent=2))
+        return
+    rows = [[k, v] for k, v in data.items()]
+    click.echo(tabulate(rows, headers=['Field', 'Value'], tablefmt='simple'))
+
+@cli.group(cls=clicommon.AliasedGroup, name='interfaces')
+def interfaces_group():
+    pass
+
+@interfaces_group.command(name='fast-linkup-mode')
+@click.pass_context
+def show_interfaces_mode(ctx):
+    db = Db()
+    ports = db.cfgdb.get_table('PORT') or {}
+    rows = []
+    for ifname, entry in sorted(ports.items()):
+        mode = entry.get('fast_linkup', 'false')
+        rows.append([ifname, mode])
+    click.echo(tabulate(rows, headers=['Interface', 'fast_linkup'], tablefmt='simple'))
+
 # Add greabox commands only if GEARBOX is configured
 if is_gearbox_configured():
     cli.add_command(gearbox.gearbox)
