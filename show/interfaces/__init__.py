@@ -20,6 +20,14 @@ from collections import OrderedDict
 HWSKU_JSON = 'hwsku.json'
 
 REDIS_HOSTIP = "127.0.0.1"
+LANES = "lanes"
+ASIC = "asic"
+STATUS = "status"
+DOWN = "DOWN"
+UP = "UP"
+APPL_PORT_TABLE = "PORT_TABLE"
+OPER_STATUS = "oper_status"
+
 
 # Read given JSON file
 def readJsonFile(fileName):
@@ -1214,3 +1222,81 @@ def dhcp_mitigation_rate(db, interfacename):
 
     header = ['Interface', 'DHCP Mitigation Rate']
     click.echo(tabulate(tablelize(keys), header, tablefmt="simple", stralign='left'))
+
+
+@interfaces.group(name='label-port', cls=clicommon.AliasedGroup)
+def labelport():
+    """Show label-port information"""
+    pass
+
+def get_ports_data():
+    """
+    This function returns a dictionary of ports, their lanes and status
+    """
+    ports_dict = {}
+    namespaces = multi_asic.get_namespace_list()
+    for namespace in namespaces:
+        db = multi_asic.connect_to_all_dbs_for_ns(namespace=namespace)
+        port_table = multi_asic.get_port_table(namespace=namespace)
+        for port_name, port_info in port_table.items():
+            lanes = port_info.get(LANES, []).split(',')
+            status = db.get(db.APPL_DB, f"{APPL_PORT_TABLE}:{port_name}", OPER_STATUS).upper()
+            if namespace not in ports_dict:
+                ports_dict[namespace] = {}
+            ports_dict[port_name] = {
+                LANES: [int(lane) for lane in lanes],
+                STATUS: status,
+                ASIC: namespace
+            }
+    return ports_dict
+
+def get_labelport_to_ports_map(ports_dict, labelport_map, lanes_per_asic):
+    """
+    This function returns a dictionary of LabelPorts -> ports: key = labelport_num, value = list of ports connected to this LabelPort
+    """
+    lanes_to_labelport = {}
+    for k, values in labelport_map.items():
+        for v in values:
+            lanes_to_labelport[int(v)] = int(k)
+    labelport_lanes_number = len(labelport_map[list(labelport_map.keys())[0]])
+    labelport_to_ports_map = {}
+    for port, info in ports_dict.items():
+        for lane in info.get(LANES, []):
+            asic_number = multi_asic.get_asic_index_from_namespace(info.get(ASIC))
+            lane += asic_number * lanes_per_asic
+            labelport_num = lanes_to_labelport.get(lane)
+            position = labelport_map[str(labelport_num)].index(str(lane))
+            port_name = f"{port}/{info.get(ASIC)}" if info.get(ASIC) != "" else port
+            if labelport_num not in labelport_to_ports_map:
+                labelport_to_ports_map[int(labelport_num)] = ['-'] * labelport_lanes_number
+            labelport_to_ports_map[int(labelport_num)][position] = f"{port_name}({info.get(STATUS, DOWN)})"
+    return labelport_to_ports_map
+
+@labelport.command(name='status')
+@clicommon.pass_db
+def labelport_status(db):
+    """
+    Show a mapping and status of label-ports -> ports
+    """
+    # Get the labelport -> lanes mapping from platform.json
+    platform_data = device_info.get_platform_json_data()
+    if platform_data is None:
+        click.echo("No platform data found", err=True)
+        raise click.Abort()
+    labelport_map = platform_data.get('label_port_lanes_mapping')
+    lanes_per_asic = int(platform_data.get('number_of_lanes_per_asic', 0))
+    labelport_lanes_number = len(labelport_map[list(labelport_map.keys())[0]])
+    if labelport_map is None:
+        click.echo("No Label-ports mapping found in platform data", err=True)
+        raise click.Abort()
+
+    # Get all ports data
+    ports_dict = get_ports_data()
+
+    # Create a dictionary of labelports -> ports: key = labelport_num, value = list of ports connected to this labelport
+    labelport_to_ports_map = get_labelport_to_ports_map(ports_dict, labelport_map, lanes_per_asic)
+    
+    # Build the table
+    header = ['Label Port'] + [f'Lane {i+1}' for i in range(labelport_lanes_number)]
+    body = [[int(labelport)] + labelport_to_ports_map[labelport] for labelport in sorted(labelport_to_ports_map.keys())]
+    click.echo(tabulate(body, header, tablefmt="outline"))
